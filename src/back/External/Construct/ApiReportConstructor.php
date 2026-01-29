@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace KeepersTeam\Webtlo\External\Construct;
 
 use GuzzleHttp\Client;
+use KeepersTeam\Webtlo\Cache\CacheInterface;
 use KeepersTeam\Webtlo\Config\ApiCredentials;
 use KeepersTeam\Webtlo\Config\ApiReportConnect;
 use KeepersTeam\Webtlo\Config\Proxy;
@@ -19,6 +20,7 @@ final class ApiReportConstructor
     public function __construct(
         private readonly ApiCredentials   $auth,
         private readonly ApiReportConnect $connect,
+        private readonly CacheInterface   $cache,
         private readonly LoggerInterface  $logger,
         private readonly Proxy            $proxy,
     ) {}
@@ -30,6 +32,7 @@ final class ApiReportConstructor
         return new ApiReportClient(
             client: $client,
             auth  : $this->auth,
+            cache : $this->cache,
             logger: $this->logger,
         );
     }

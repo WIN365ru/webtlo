@@ -8,6 +8,7 @@ use DateTimeInterface;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\GuzzleException;
+use KeepersTeam\Webtlo\Cache\CacheInterface;
 use KeepersTeam\Webtlo\Config\ApiCredentials;
 use KeepersTeam\Webtlo\Data\KeeperPermissions;
 use KeepersTeam\Webtlo\External\ApiReport\Actions;
@@ -28,6 +29,7 @@ final class ApiReportClient
     public function __construct(
         private readonly Client          $client,
         private readonly ApiCredentials  $auth,
+        private readonly CacheInterface  $cache,
         private readonly LoggerInterface $logger,
     ) {
         $this->auth->validate();
