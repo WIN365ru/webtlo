@@ -6,6 +6,7 @@ namespace KeepersTeam\Webtlo\Module\Report;
 
 use DateTimeImmutable;
 use Exception;
+use KeepersTeam\Webtlo\Cache\CacheInterface;
 use KeepersTeam\Webtlo\Config\ApiCredentials;
 use KeepersTeam\Webtlo\Config\ReportSend;
 use KeepersTeam\Webtlo\Data\Forum;
@@ -27,6 +28,8 @@ use RuntimeException;
  */
 final class CreateReport
 {
+    private const CACHE_TTL_SECONDS = 300;
+
     /** @var int[] */
     public ?array $forums = null;
 
@@ -61,6 +64,7 @@ final class CreateReport
         private readonly UpdateTime      $tableUpdate,
         private readonly Forums          $tableForums,
         private readonly WebTLO          $webtlo,
+        private readonly CacheInterface  $cache,
         private readonly LoggerInterface $logger,
     ) {
         $this->auth->validate();
@@ -442,6 +446,12 @@ final class CreateReport
      */
     private function getClientsTopics(): array
     {
+        $cacheKey = $this->getCacheKey('clients-topics');
+        $cached = $this->cache->get($cacheKey);
+        if (is_array($cached)) {
+            return $cached;
+        }
+
         $query = '
             SELECT client_id,
                    COUNT(1) AS topics,
@@ -453,7 +463,10 @@ final class CreateReport
             ORDER BY topics DESC
         ';
 
-        return $this->db->query($query, [], PDO::FETCH_ASSOC | PDO::FETCH_UNIQUE);
+        $data = $this->db->query($query, [], PDO::FETCH_ASSOC | PDO::FETCH_UNIQUE);
+        $this->cache->set($cacheKey, $data, self::CACHE_TTL_SECONDS);
+
+        return $data;
     }
 
     /**
@@ -527,6 +540,20 @@ final class CreateReport
         $includeForums  = KeysObject::create($forumIds);
         $excludeClients = KeysObject::create($this->reportSend->excludedClients);
 
+        $cacheKey = $this->getCacheKey(
+            sprintf(
+                'stored-values:forums:%s:exclude:%s',
+                implode(',', $forumIds),
+                implode(',', $this->reportSend->excludedClients),
+            )
+        );
+        $cached = $this->cache->get($cacheKey);
+        if (is_array($cached)) {
+            $this->stored = $cached;
+
+            return;
+        }
+
         // Вытаскиваем из базы хранимое.
         $values = $this->db->query(
             "SELECT
@@ -572,6 +599,7 @@ final class CreateReport
         }
 
         $this->stored = $values;
+        $this->cache->set($cacheKey, $values, self::CACHE_TTL_SECONDS);
     }
 
     /**
@@ -605,6 +633,19 @@ final class CreateReport
 
         // Получение данных о раздачах подраздела.
         $excludeClients = KeysObject::create($this->reportSend->excludedClients);
+        $cacheKey = $this->getCacheKey(
+            sprintf(
+                'forum-topics:%d:exclude:%s',
+                $forumId,
+                implode(',', $this->reportSend->excludedClients),
+            )
+        );
+        $cached = $this->cache->get($cacheKey);
+        if (is_array($cached)) {
+            $this->cache[$forumId] = $cached;
+
+            return $cached;
+        }
 
         $topics = $this->db->query(
             "
@@ -637,6 +678,7 @@ final class CreateReport
         }
 
         $this->cache[$forumId] = $topics;
+        $this->cache->set($cacheKey, $topics, self::CACHE_TTL_SECONDS);
 
         return $topics;
     }
@@ -743,5 +785,10 @@ final class CreateReport
         $formatted = $this->bytes($bytes);
 
         return vsprintf('[b]%s[/b] %s', explode(' ', $formatted));
+    }
+
+    private function getCacheKey(string $suffix): string
+    {
+        return sprintf('report:%d:%s', $this->auth->userId, $suffix);
     }
 }

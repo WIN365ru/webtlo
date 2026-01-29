@@ -8,6 +8,7 @@ use Closure;
 use DateTimeImmutable;
 use DateTimeZone;
 use GuzzleHttp\Exception\GuzzleException;
+use KeepersTeam\Webtlo\Cache\CacheInterface;
 use KeepersTeam\Webtlo\External\ApiReport\V1\KeepersResponse;
 use KeepersTeam\Webtlo\Helper;
 use RuntimeException;
@@ -15,6 +16,8 @@ use Throwable;
 
 trait KeepersReports
 {
+    private const CACHE_TTL_SECONDS = 600;
+
     /** Путь к временному каталогу с распакованными данными. */
     private ?string $gzipReportsFolder = null;
 
@@ -77,12 +80,21 @@ trait KeepersReports
      */
     private function fetchApiReports(int $forumId): array
     {
+        $cacheKey = $this->getCacheKey($forumId);
+        $cached = $this->cache->get($cacheKey);
+        if (is_array($cached)) {
+            return $cached;
+        }
+
         try {
             $response = $this->client->get(uri: "subforum/$forumId/reports", options: [
                 'query' => ['columns' => 'status,last_update_time,last_seeded_time'],
             ]);
 
-            return json_decode($response->getBody()->getContents(), true) ?: [];
+            $data = json_decode($response->getBody()->getContents(), true) ?: [];
+            $this->cache->set($cacheKey, $data, self::CACHE_TTL_SECONDS);
+
+            return $data;
         } catch (GuzzleException $e) {
             $this->logException($e->getCode(), $e->getMessage());
 
@@ -121,5 +133,10 @@ trait KeepersReports
 
             $this->gzipReportsFolder = null;
         }
+    }
+
+    private function getCacheKey(int $forumId): string
+    {
+        return "api-report:subforum:$forumId";
     }
 }

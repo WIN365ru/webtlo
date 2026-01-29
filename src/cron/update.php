@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use KeepersTeam\Webtlo\App;
+use KeepersTeam\Webtlo\Cache\CacheInterface;
 use KeepersTeam\Webtlo\Helper;
 use KeepersTeam\Webtlo\Timers;
 use KeepersTeam\Webtlo\Update\ForumTree;
@@ -66,6 +67,10 @@ try {
      */
     $torrentsClients = $app->get(TorrentsClients::class);
     $torrentsClients->update();
+
+    /** @var CacheInterface $cache */
+    $cache = $app->get(CacheInterface::class);
+    $cache->clear();
 
     $log->info('Обновление всех данных завершено за {sec}', ['sec' => Timers::getExecTime('full_update')]);
 } catch (RuntimeException $e) {
