@@ -25,3 +25,14 @@ services:
         # Проброшенный каталог с файлами конфигурации
       - "./webtlo-data:/data"
     restart: on-failure
+
+  # Redis для кеширования (опционально)
+  redis:
+    image: redis:7-alpine
+    container_name: webtlo-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - "./webtlo-redis:/data"
+    restart: on-failure
