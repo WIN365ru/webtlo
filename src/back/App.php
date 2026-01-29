@@ -5,13 +5,16 @@ declare(strict_types=1);
 namespace KeepersTeam\Webtlo;
 
 use KeepersTeam\Webtlo\Clients\ClientFactory;
+use KeepersTeam\Webtlo\Config\Automation;
 use KeepersTeam\Webtlo\Config\ConfigServiceProvider;
 use KeepersTeam\Webtlo\External\ApiForumClient;
 use KeepersTeam\Webtlo\External\ApiReportClient;
 use KeepersTeam\Webtlo\External\ExternalServiceProvider;
 use KeepersTeam\Webtlo\External\ForumClient;
-use KeepersTeam\Webtlo\Static\AppLogger;
+use KeepersTeam\Webtlo\Logger\LoggerServiceProvider;
+use KeepersTeam\Webtlo\Logger\MemoryLoggerHandler as Log;
 use KeepersTeam\Webtlo\Storage\CloneServiceProvider;
+use KeepersTeam\Webtlo\TopicList\TopicListServiceProvider;
 use League\Container\Container;
 use League\Container\ReflectionContainer;
 use Psr\Log\LoggerInterface;
@@ -56,28 +59,14 @@ final class App
         $container->addServiceProvider(new AppServiceProvider());
         // Добавляем обработчик классов конфига.
         $container->addServiceProvider(new ConfigServiceProvider());
+        // Подключаем интерфейс для ведения журнала.
+        $container->addServiceProvider(new LoggerServiceProvider(logFile: $logFile));
         // Добавляем создание таблиц-клонов.
         $container->addServiceProvider(new CloneServiceProvider());
         // Добавляем подключение к внешним ресурсам.
         $container->addServiceProvider(new ExternalServiceProvider());
-
-        // Подключаем файл конфига, 'config.ini' по-умолчанию.
-        $container->add(Settings::class, fn() => new Settings(
-            ini: new TIniFileEx(),
-            db : $container->get(DB::class),
-        ));
-        $container->add('config', fn() => $container->get(Settings::class)->populate());
-
-        // Добавляем интерфейс для записи логов.
-        $container->add(LoggerInterface::class, function() use ($container, $logFile) {
-            $config = $container->get('config');
-            $level  = AppLogger::getLogLevel($config['log_level'] ?? '');
-
-            return AppLogger::create($logFile, $level);
-        });
-
-        // Подключаем БД.
-        $container->add(DB::class, fn() => DB::create());
+        // Добавляем классы для фильтрации раздач.
+        $container->addServiceProvider(new TopicListServiceProvider());
 
         return self::$appContainer = new self($container);
     }
@@ -91,17 +80,14 @@ final class App
         }
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    public function getLegacyConfig(): array
-    {
-        return $this->get('config');
-    }
-
     public function getDataBase(): DB
     {
         return $this->get(DB::class);
+    }
+
+    public function getAutomation(): Automation
+    {
+        return $this->get(Automation::class);
     }
 
     public function getForumClient(): ForumClient
@@ -132,6 +118,11 @@ final class App
     public function getClientFactory(): ClientFactory
     {
         return $this->get(ClientFactory::class);
+    }
+
+    public function getLoggerRecords(): string
+    {
+        return Log::getRecords();
     }
 
     /**

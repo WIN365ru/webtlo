@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace KeepersTeam\Webtlo;
 
+use KeepersTeam\Webtlo\Config\AverageSeeds;
 use KeepersTeam\Webtlo\Storage\Traits;
 use PDO;
 use PDOException;
+use Psr\Log\LoggerInterface;
 use RuntimeException;
 
 final class DB
@@ -17,56 +19,51 @@ final class DB
     use Traits\DbQuery;
 
     /** Актуальная версия БД */
-    private const DATABASE_VERSION = 15;
+    protected const DATABASE_VERSION = 15;
 
     /** Инициализация таблиц актуальной версии. */
-    private const INIT_FILE = '9999-init-database.sql';
+    protected const INIT_FILE = '9999-init-database.sql';
 
     /** Название файла БД. */
     private const DATABASE_FILE = 'webtlo.db';
 
-    private static ?self $instance = null;
+    public function __construct(
+        public readonly PDO             $db,
+        public readonly LoggerInterface $logger,
+    ) {}
 
-    public function __construct(public readonly PDO $db) {}
-
-    public static function create(): DB
-    {
+    public static function connect(
+        LoggerInterface $logger,
+        AverageSeeds $averageSeeds,
+    ): DB {
         $databasePath = self::getDatabasePath();
 
-        if (self::$instance === null) {
-            try {
-                // Подключаемся к БД. Создаём кастомную функцию like.
-                $pdo = new PDO('sqlite:' . $databasePath);
-                $pdo->sqliteCreateFunction('like', [self::class, 'lexa_ci_utf8_like'], 2);
+        try {
+            // Подключаемся к БД. Создаём кастомную функцию like.
+            $pdo = new PDO('sqlite:' . $databasePath);
+            $pdo->sqliteCreateFunction('like', [self::class, 'lexa_ci_utf8_like'], 2);
 
-                // Создаём экземпляр класса.
-                $db = new DB($pdo);
+            // Создаём экземпляр класса.
+            $db = new DB(db: $pdo, logger: $logger);
 
-                // Инициализация/миграция таблиц БД.
-                $db->checkDatabaseVersion($databasePath);
+            // Инициализация/миграция таблиц БД.
+            $db->checkDatabaseVersion(databasePath: $databasePath);
+        } catch (PDOException $e) {
+            $logger->emergency('Ошибка инициализации БД.', ['path' => $databasePath, 'exception' => $e]);
 
-                self::$instance = $db;
-            } catch (PDOException $e) {
-                throw new RuntimeException(
-                    sprintf('Не удалось подключиться к БД в "%s", причина: %s', $databasePath, $e)
-                );
-            }
+            throw new RuntimeException(
+                sprintf(
+                    'Не удалось подключиться к БД в "%s", причина: %s',
+                    $databasePath,
+                    $e->getMessage()
+                )
+            );
         }
 
         // Очистка таблиц от неактуальных записей.
-        $instance = self::$instance;
-        $instance->clearTables();
+        $db->clearTables($averageSeeds->historyExpiryDays);
 
-        return $instance;
-    }
-
-    public static function getInstance(): self
-    {
-        if (self::$instance === null) {
-            return self::create();
-        }
-
-        return self::$instance;
+        return $db;
     }
 
     private static function getDatabasePath(): string

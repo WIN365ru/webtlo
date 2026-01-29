@@ -5,14 +5,13 @@ declare(strict_types=1);
 require __DIR__ . '/../../vendor/autoload.php';
 
 use KeepersTeam\Webtlo\App;
-use KeepersTeam\Webtlo\Legacy\Log;
+
+// Подключаем контейнер.
+$app = App::create();
+$log = $app->getLogger();
 
 try {
-    $app = App::create();
-    $db  = $app->getDataBase();
-
-    // получение настроек
-    $cfg = $app->getLegacyConfig();
+    $db = $app->getDataBase();
 
     $counters = $db->query(
         'SELECT tu.status, COUNT(1) AS quantity
@@ -99,6 +98,7 @@ try {
         echo '</br>';
     }
 } catch (Exception $e) {
-    Log::append($e->getMessage());
-    echo Log::get();
+    $log->error($e->getMessage());
+
+    echo $app->getLoggerRecords();
 }

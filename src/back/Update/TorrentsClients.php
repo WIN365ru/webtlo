@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace KeepersTeam\Webtlo\Update;
 
 use KeepersTeam\Webtlo\Clients\ClientFactory;
-use KeepersTeam\Webtlo\DB;
+use KeepersTeam\Webtlo\Config\SubForums;
+use KeepersTeam\Webtlo\Config\TopicSearch;
+use KeepersTeam\Webtlo\Config\TorrentClients;
 use KeepersTeam\Webtlo\Enum\KeepingPriority;
 use KeepersTeam\Webtlo\Enum\UpdateMark;
 use KeepersTeam\Webtlo\External\Api\V1\TopicDetails;
@@ -13,7 +15,6 @@ use KeepersTeam\Webtlo\External\Api\V1\TopicSearchMode;
 use KeepersTeam\Webtlo\External\ApiForumClient;
 use KeepersTeam\Webtlo\External\Data\ApiError;
 use KeepersTeam\Webtlo\External\ForumClient;
-use KeepersTeam\Webtlo\Settings;
 use KeepersTeam\Webtlo\Storage\Clone\TopicsUnregistered;
 use KeepersTeam\Webtlo\Storage\Clone\TopicsUntracked;
 use KeepersTeam\Webtlo\Storage\Clone\Torrents;
@@ -40,10 +41,11 @@ final class TorrentsClients
     public function __construct(
         private readonly ApiForumClient     $apiClient,
         private readonly ForumClient        $forumClient,
-        private readonly Settings           $settings,
-        private readonly DB                 $db,
         private readonly UpdateTime         $updateTime,
+        private readonly SubForums          $subForums,
+        private readonly TopicSearch        $topicSearch,
         private readonly ClientFactory      $clientFactory,
+        private readonly TorrentClients     $torrentClients,
         private readonly Torrents           $cloneTorrents,
         private readonly TopicsUntracked    $cloneUntracked,
         private readonly TopicsUnregistered $cloneUnregistered,
@@ -62,16 +64,11 @@ final class TorrentsClients
         // Получаем раздачи от клиентов и записываем их в БД.
         $this->updateClients();
 
-        // Получаем параметры.
-        $config = $this->settings->get();
-
         // Найдём раздачи из не хранимых подразделов.
-        $doUpdateUntracked = (bool) $config['update']['untracked'];
-        $this->updateUntracked($doUpdateUntracked);
+        $this->updateUntracked();
 
         // Найдём разрегистрированные раздачи.
-        $doUpdateUnregistered = $config['update']['untracked'] && $config['update']['unregistered'];
-        $this->updateUnregistered($doUpdateUnregistered);
+        $this->updateUnregistered();
 
         $log = json_encode($this->timers);
         if ($log !== false) {
@@ -84,15 +81,12 @@ final class TorrentsClients
      */
     private function checkClientsCount(): bool
     {
-        // Получаем параметры.
-        $config = $this->settings->get();
-
         // Если нет настроенных торрент-клиентов, удалим все раздачи и отметку.
-        if (empty($config['clients'])) {
+        if (!$this->torrentClients->count()) {
             $this->logger->notice('Торрент-клиенты не найдены.');
 
-            $this->updateTime->setMarkerTime(UpdateMark::CLIENTS->value, 0);
-            $this->db->executeStatement('DELETE FROM Torrents WHERE TRUE');
+            $this->updateTime->setMarkerTime(marker: UpdateMark::CLIENTS, updateTime: 0);
+            $this->cloneTorrents->clearOriginTable();
 
             return false;
         }
@@ -102,16 +96,13 @@ final class TorrentsClients
 
     private function updateClients(): void
     {
-        // Получаем параметры.
-        $config = $this->settings->get();
-
         $this->logger->info(
             'Сканирование торрент-клиентов... Найдено {count} шт.',
-            ['count' => count($config['clients'])]
+            ['count' => $this->torrentClients->count()]
         );
 
         /** Используемый домен трекера. */
-        $forumDomain = $this->settings->getForumDomain();
+        $forumDomain = $this->forumClient->getForumDomain();
 
         /** Клиенты, данные от которых получить не удалось */
         $failedClients = [];
@@ -119,20 +110,20 @@ final class TorrentsClients
         $excludedClients = [];
 
         Timers::start('update_clients');
-        foreach ($config['clients'] as $torrentClientId => $torrentClientData) {
-            $torrentClientId = (int) $torrentClientId;
+        foreach ($this->torrentClients->clients as $clientOptions) {
+            $clientId  = $clientOptions->id;
+            $clientTag = $clientOptions->name;
 
-            Timers::start("update_client_$torrentClientId");
-            $clientTag = sprintf('%s (%s)', $torrentClientData['cm'], $torrentClientData['cl']);
+            Timers::start("update_client_$clientId");
 
             // Признак исключения раздач клиента из формируемых отчётов.
-            if ($torrentClientData['exclude'] ?? false) {
-                $excludedClients[] = $torrentClientId;
+            if ($clientOptions->exclude) {
+                $excludedClients[] = $clientId;
             }
 
             try {
                 // Подключаемся к торрент-клиенту.
-                $client = $this->clientFactory->fromConfigProperties(options: $torrentClientData);
+                $client = $this->clientFactory->getClient(clientOptions: $clientOptions);
 
                 // Меняем домен трекера, для корректного поиска раздач.
                 $client->setDomain(domain: $forumDomain);
@@ -141,7 +132,7 @@ final class TorrentsClients
                     'Клиент {client} в данный момент недоступен',
                     ['client' => $clientTag, 'error' => $e->getMessage()]
                 );
-                $failedClients[] = $torrentClientId;
+                $failedClients[] = $clientId;
 
                 continue;
             }
@@ -154,14 +145,14 @@ final class TorrentsClients
                     'Не удалось получить данные о раздачах от торрент-клиента {client}',
                     ['client' => $clientTag, 'error' => $e->getMessage()]
                 );
-                $failedClients[] = $torrentClientId;
+                $failedClients[] = $clientId;
 
                 continue;
             }
 
             $countTorrents = count($torrents);
             foreach ($torrents->getGenerator() as $torrent) {
-                $this->cloneTorrents->addTorrent($torrentClientId, $torrent);
+                $this->cloneTorrents->addTorrent($clientId, $torrent);
             }
             unset($torrents);
 
@@ -171,10 +162,10 @@ final class TorrentsClients
             $this->logger->info('{client} получено раздач: {count} шт за {sec}', [
                 'client' => $clientTag,
                 'count'  => $countTorrents,
-                'sec'    => Timers::getExecTime("update_client_$torrentClientId"),
+                'sec'    => Timers::getExecTime("update_client_$clientId"),
             ]);
 
-            unset($torrentClientId, $torrentClientData, $countTorrents);
+            unset($clientId, $clientOptions, $countTorrents);
         }
         $this->timers['update_clients'] = Timers::getExecTime('update_clients');
 
@@ -194,17 +185,14 @@ final class TorrentsClients
     /**
      * Найдём раздачи из не хранимых подразделов.
      */
-    private function updateUntracked(bool $doUpdateUntracked): void
+    private function updateUntracked(): void
     {
-        $config = $this->settings->get();
-
-        $subsections = (array) ($config['subsections'] ?? []);
-        $subsections = KeysObject::create(array_keys($subsections));
-
-        if ($doUpdateUntracked) {
+        if ($this->topicSearch->untracked) {
             Timers::start('search_untracked');
 
-            $untrackedTorrentHashes = $this->cloneTorrents->selectUntrackedRows(subsections: $subsections);
+            $untrackedTorrentHashes = $this->cloneTorrents->selectUntrackedRows(
+                subsections: $this->subForums->getKeyObject()
+            );
 
             $countUntracked = count($untrackedTorrentHashes);
             if ($countUntracked) {
@@ -255,9 +243,9 @@ final class TorrentsClients
     /**
      * Найдём разрегистрированные раздачи.
      */
-    private function updateUnregistered(bool $doUpdateUnregistered): void
+    private function updateUnregistered(): void
     {
-        if ($doUpdateUnregistered) {
+        if ($this->topicSearch->untracked && $this->topicSearch->unregistered) {
             Timers::start('search_unregistered');
 
             try {

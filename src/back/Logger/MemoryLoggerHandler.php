@@ -1,17 +1,48 @@
 <?php
 
-namespace KeepersTeam\Webtlo\Legacy;
+declare(strict_types=1);
 
-final class Log
+namespace KeepersTeam\Webtlo\Logger;
+
+use Monolog\Handler\AbstractProcessingHandler;
+use Monolog\Handler\HandlerInterface;
+use Monolog\Level;
+use Monolog\LogRecord;
+
+/**
+ * Хранение журнала в памяти приложения.
+ */
+final class MemoryLoggerHandler extends AbstractProcessingHandler implements HandlerInterface
 {
-    /** @var string[] */
-    private static array $log = [];
+    private const DATE_FORMAT = 'Y-m-d H:i:s';
 
-    public static function append(string $message = ''): void
+    /** @var string[] */
+    private static array $records = [];
+
+    public function __construct(int|string|Level $level = Level::Debug, bool $bubble = true)
     {
+        parent::__construct($level, $bubble);
+    }
+
+    protected function write(LogRecord $record): void
+    {
+        $message = trim((string) $record->formatted);
         if ($message !== '') {
-            self::$log[] = date('d.m.Y H:i:s') . ' ' . $message;
+            self::$records[] = date(self::DATE_FORMAT) . ' ' . $message;
         }
+    }
+
+    public static function getRecords(string $break = '<br />'): string
+    {
+        if (count(self::$records)) {
+            $formatted = self::formatRows(rows: self::$records, break: $break);
+
+            self::$records = [];
+
+            return $formatted;
+        }
+
+        return '';
     }
 
     /**
@@ -45,14 +76,5 @@ final class Log
         }
 
         return implode($break, $output) . $break;
-    }
-
-    public static function get(string $break = '<br />'): string
-    {
-        if (count(self::$log)) {
-            return self::formatRows(rows: self::$log, break: $break);
-        }
-
-        return '';
     }
 }

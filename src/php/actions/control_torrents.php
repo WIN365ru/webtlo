@@ -6,7 +6,6 @@ require __DIR__ . '/../../vendor/autoload.php';
 
 use KeepersTeam\Webtlo\Action\TopicControl;
 use KeepersTeam\Webtlo\App;
-use KeepersTeam\Webtlo\Legacy\Log;
 
 $control_result = [
     'result' => 'В процессе регулировки раздач были ошибки. ' .
@@ -18,12 +17,10 @@ $app = App::create('control.log');
 $log = $app->getLogger();
 
 try {
-    $config = $app->getLegacyConfig();
-
     /** @var TopicControl $topicControl */
     $topicControl = $app->get(TopicControl::class);
     // Запускаем регулировку раздач.
-    $topicControl->process(config: $config);
+    $topicControl->process();
 
     $control_result['result'] = 'Регулировка раздач выполнена.';
 } catch (RuntimeException $e) {
@@ -35,6 +32,6 @@ try {
 }
 
 // Добавляем записанный журнал.
-$control_result['log'] = Log::get();
+$control_result['log'] = $app->getLoggerRecords();
 
 echo json_encode($control_result, JSON_UNESCAPED_UNICODE);

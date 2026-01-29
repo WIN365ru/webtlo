@@ -15,12 +15,12 @@ jobs:
     name: webtlo zip
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           set-safe-directory: true
 
       - name: Cache Composer dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /tmp/composer-cache
           key: Composer-${{ runner.os }}-${{ hashFiles('**/composer.lock') }}
@@ -65,7 +65,7 @@ jobs:
 
       - name: Cache WebServer
         id: cache_web_server
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /tmp/server_dir
           key: WebServer-${{ runner.os }}-${{ vars.NGINX_VERSION || '1.24.0' }}-PHP-8.2
@@ -122,7 +122,7 @@ jobs:
           echo "Done $zip_name"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: releases
           path: release/*.zip
@@ -130,7 +130,7 @@ jobs:
 
       - name: Cache release
         if: ${{ github.ref_type == 'tag' }}
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ./release
           key: ${{ github.ref_type }}-${{ github.sha }}-release

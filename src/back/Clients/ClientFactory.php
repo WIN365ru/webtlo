@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace KeepersTeam\Webtlo\Clients;
 
 use KeepersTeam\Webtlo\Config\TorrentClientOptions;
+use KeepersTeam\Webtlo\Config\TorrentClients;
 use KeepersTeam\Webtlo\Storage\Table\Topics;
 use KeepersTeam\Webtlo\Storage\Table\Torrents;
 use Psr\Log\LoggerInterface;
@@ -13,11 +14,15 @@ use RuntimeException;
 final class ClientFactory
 {
     public function __construct(
+        private readonly TorrentClients  $options,
         private readonly LoggerInterface $logger,
         private readonly Topics          $topics,
         private readonly Torrents        $torrents,
     ) {}
 
+    /**
+     * Собрать подключение к торрент-клиенту из параметров.
+     */
     public function getClient(TorrentClientOptions $clientOptions): ClientInterface
     {
         // Параметры для основных клиентов.
@@ -37,21 +42,38 @@ final class ClientFactory
     }
 
     /**
-     * Коннект с клиентом, из параметров клиента в конфиге.
-     *
-     * @param array<string, mixed> $options
+     * Попробовать подключится к торрент-клиенту по clientId.
      */
-    public function fromConfigProperties(array $options): ClientInterface
+    public function getClientById(int $clientId): ?ClientInterface
     {
-        $type = ClientType::tryFrom((string) $options['cl']);
+        $clientOptions = $this->options->getClientOptions(clientId: $clientId);
 
-        if ($type === null) {
-            $this->logger->error('Unknown client type.', $options);
+        if ($clientOptions === null) {
+            $this->logger->warning(
+                'В настройках нет данных о торрент-клиенте с идентификатором [{tag}]',
+                ['tag' => $clientId]
+            );
 
-            throw new RuntimeException('Unknown client type');
+            return null;
         }
 
-        return $this->getClient(TorrentClientOptions::fromConfigProperties($options));
+        try {
+            $client = $this->getClient($clientOptions);
+
+            // Проверка доступности торрент-клиента.
+            if (!$client->isOnline()) {
+                throw new RuntimeException('Не удалось авторизоваться.');
+            }
+
+            return $client;
+        } catch (RuntimeException $e) {
+            $this->logger->error(
+                'Торрент-клиент {tag} в данный момент недоступен. {error}',
+                ['tag' => $clientOptions->name, 'error' => $e->getMessage()]
+            );
+        }
+
+        return null;
     }
 
     /**

@@ -10,31 +10,7 @@ use RuntimeException;
 
 final class Helper
 {
-    /**
-     * Сортировка массива по заданному ключу, с учётом кириллицы.
-     *
-     * @param array<int|string, mixed> $input
-     *
-     * @return array<int|string, mixed>
-     */
-    public static function natsortField(array $input, string $field, int $direct = 1): array
-    {
-        uasort($input, function($a, $b) use ($field, $direct) {
-            $a = $a[$field] ?? 0;
-            $b = $b[$field] ?? 0;
-
-            if (is_numeric($a) && is_numeric($b)) {
-                return ($a <=> $b) * $direct;
-            }
-
-            $a = (string) mb_ereg_replace('ё', 'е', mb_strtolower((string) $a, 'UTF-8'));
-            $b = (string) mb_ereg_replace('ё', 'е', mb_strtolower((string) $b, 'UTF-8'));
-
-            return strnatcasecmp($a, $b) * $direct;
-        });
-
-        return $input;
-    }
+    private const LOG_DIR = 'logs';
 
     /** Конвертация размера в строку. */
     public static function convertBytes(int $size, int $maxPow = 3): string
@@ -79,13 +55,13 @@ final class Helper
     public static function makeDirRecursive(string $path): bool
     {
         // Не уверен, что эта конвертация нужна, но пусть пока будет.
-        $path = self::normalizePathEncoding($path);
+        $path = self::normalizePathEncoding(path: $path);
 
         if (is_dir($path) && is_writable($path)) {
             return true;
         }
 
-        return !file_exists($path) && mkdir($path, 0o777, true);
+        return !file_exists($path) && @mkdir($path, 0o777, true);
     }
 
     /**
@@ -93,8 +69,8 @@ final class Helper
      */
     public static function checkDirRecursive(string $path): void
     {
-        if (!self::makeDirRecursive($path)) {
-            throw new RuntimeException("Не удалось создать каталог '$path'");
+        if (!self::makeDirRecursive(path: $path)) {
+            throw new RuntimeException("Не удалось создать каталог '$path'. Проверьте права на запись.");
         }
     }
 
@@ -148,7 +124,7 @@ final class Helper
         if ($subFolder !== null) {
             $path .= DIRECTORY_SEPARATOR . $subFolder;
 
-            self::makeDirRecursive(path: $path);
+            self::checkDirRecursive(path: $path);
         }
 
         if ($file !== null) {
@@ -168,9 +144,9 @@ final class Helper
     /**
      * @return string The log directory for the application
      */
-    public static function getLogDir(): string
+    public static function getStorageLogsPath(?string $file = null): string
     {
-        return self::getStorageDir() . DIRECTORY_SEPARATOR . 'logs';
+        return self::getStorageSubFolderPath(subFolder: self::LOG_DIR, file: $file);
     }
 
     /** Получить путь к каталогу/файлу миграций. */
@@ -219,6 +195,11 @@ final class Helper
     public static function encodeCyrillicString(string $string): string
     {
         return (string) mb_convert_encoding($string, 'Windows-1251', 'UTF-8');
+    }
+
+    public static function prepareCompareString(string $string): string
+    {
+        return (string) mb_ereg_replace('ё', 'е', mb_strtolower($string, 'UTF-8'));
     }
 
     /**
@@ -282,25 +263,5 @@ final class Helper
         $newDate  = $newDate->setTimezone(new DateTimeZone('UTC'));
 
         return $newDate > $prevDate && $newDate->format('Y-m-d') !== $prevDate->format('Y-m-d');
-    }
-
-    /**
-     * Проверить включена ли опция автоматического запуска действия.
-     *
-     * @param array<string, mixed> $config
-     */
-    public static function isScheduleActionEnabled(array $config, string $action): bool
-    {
-        return (bool) ($config['automation'][$action] ?? 0);
-    }
-
-    /**
-     * Проверить включена ли дополнительная опция обновления раздач.
-     *
-     * @param array<string, mixed> $config
-     */
-    public static function isUpdatePropertyEnabled(array $config, string $property): bool
-    {
-        return (bool) ($config['update'][$property] ?? 0);
     }
 }
