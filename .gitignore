@@ -8,6 +8,9 @@
 /data
 /webtlo-data*
 /test*
+!/tests/
+!/tests/**
+/tests/tmp/
 .cache
 .php-cs-fixer.cache
 *.db
